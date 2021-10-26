@@ -16,7 +16,7 @@ def load_traj(traj_path: str, parm_path: str, stride: int = 10) -> pt.Trajectory
 
     """
     Read trajectory, autoimage and RMSD align to first frame.
-    
+
     Parameters
     ----------
     traj_path : str
@@ -25,7 +25,7 @@ def load_traj(traj_path: str, parm_path: str, stride: int = 10) -> pt.Trajectory
         Path to .prmtop file
     stride : int (default: 10)
         Frame stride to subsample
-        
+
     Returns
     -------
     traj : pt.Trajectory
@@ -42,43 +42,13 @@ def load_traj(traj_path: str, parm_path: str, stride: int = 10) -> pt.Trajectory
     return traj
 
 
-def get_top_clf(n_clusters: np.array, scores: np.array, classifiers: Dict[str, KMeans]) -> Tuple[KMeans, int]:
-
-    """
-    Get top kmeans classifier based on silhouette score.
-
-    Parameters
-    ----------
-    n_clusters : np.array
-        Array of clusters tested
-    scores : np.array
-        Silhouette scores for each classifier
-    classifiers : Dict
-        Dict with keys number of clusters and values the fit KMeans classifier
-
-    Returns
-    -------
-    clf : KMeans
-        KMeans classifier fit with optimal number of clusters
-    clusters : int
-        Optimal number of clusters for kmeans
-    """
-    
-    # index top score
-    top_idx = np.argmax(scores)
-
-    # select
-    clusters = n_clusters[top_idx]
-    clf = classifiers[str(clusters)]
-    
-    return clf, clusters
-
-
-def silhouette_scores(traj: pt.Trajectory, min_clusters: int=2, max_clusters: int=10) -> Tuple[np.array, np.array, np.array, dict]:
+def silhouette_scores(
+    traj: pt.Trajectory, min_clusters: int = 2, max_clusters: int = 10
+) -> Tuple[np.array, np.array, np.array, dict]:
 
     """
     KMeans on trajectory coordinates to lump conformations.
-    
+
     Parameters
     ----------
     traj : pt.Trajectory
@@ -99,62 +69,136 @@ def silhouette_scores(traj: pt.Trajectory, min_clusters: int=2, max_clusters: in
     classifiers : Dict[str, KMeans]
         Dict with keys number of clusters and values the fit KMeans classifier
     """
-    
+
     classifiers = {}
-    
+
     # alpha carbon coordinates
-    traj = traj['@CA'].xyz.reshape(traj.shape[0], -1)
+    traj = traj["@CA"].xyz.reshape(traj.shape[0], -1)
 
     # dim reduce
     pipe = make_pipeline(StandardScaler(), PCA(n_components=2))
     traj_pca = pipe.fit_transform(traj)
-    
+
     # kmeans scan over range of cluster sizes
     n_clusters = np.arange(min_clusters, max_clusters + 1)
     scores = np.zeros(len(n_clusters))
     for i, cluster in enumerate(n_clusters):
         kmeans = KMeans(n_clusters=cluster)
         labels = kmeans.fit_predict(traj_pca)
-        
+
         # score fit by silhouette
         sil = silhouette_score(traj_pca, labels)
         scores[i] = sil
-        
+
         classifiers[str(cluster)] = kmeans
-        
+
     return traj_pca, n_clusters, scores, classifiers
 
 
-def get_representative_frame(traj: pt.Trajectory, traj_pca: np.array, clf: Any, name: str = 'rep') -> int:
-     
-    # get closest frame to most populated cluster
+def get_top_clf(
+    n_clusters: np.array, scores: np.array, classifiers: Dict[str, KMeans]
+) -> Tuple[KMeans, int]:
+
+    """
+    Get top kmeans classifier based on silhouette score.
+
+    Parameters
+    ----------
+    n_clusters : np.array
+        Array of clusters tested
+    scores : np.array
+        Silhouette scores for each classifier
+    classifiers : Dict
+        Dict with keys number of clusters and values the fit KMeans classifier
+
+    Returns
+    -------
+    clf : KMeans
+        KMeans classifier fit with optimal number of clusters
+    clusters : int
+        Optimal number of clusters for kmeans
+    """
+
+    # index top score
+    top_idx = np.argmax(scores)
+
+    # select
+    clusters = n_clusters[top_idx]
+    clf = classifiers[str(clusters)]
+
+    return clf, clusters
+
+
+def get_representative_frame(
+    traj: pt.Trajectory, traj_pca: np.array, clf: KMeans, name: str = "rep"
+) -> int:
+
+    """
+    Get frame from most populated cluster center.
+
+    Parameters
+    ----------
+    traj : pt.Trajector
+        MD trajectory
+    traj_pca : np.array
+        Trajectory reduced to 2-dim by PCA, shape: (n_frames, 2)
+    clf : KMeans
+        KMeans classifier fit with optimal number of clusters
+    name : str (default: 'rep')
+        Output pdb filename
+
+    Returns
+    -------
+    frame_idx : int
+        Frame index for representative frame
+    """
+
+    # select largest cluster
     labels = clf.predict(traj_pca)
     label_counts = np.bincount(labels)
     top_label = np.argmax(label_counts)
-    
+
+    # calc distance from each point to cluster center, select min for largeset cluster
     dists = clf.transform(traj_pca)
     frame_idx = np.argmin(dists[:, top_label])
-    
-    pt.write_traj(f'{name}.pdb', traj['!:WAT,Na+,Cl-'], frame_indices=[frame_idx], overwrite=True)
+
+    # save frame pdb
+    pt.write_traj(
+        f"{name}.pdb", traj["!:WAT,Na+,Cl-"], frame_indices=[frame_idx], overwrite=True
+    )
 
     return frame_idx
 
 
 def run_cpptraj(traj_path: str, parm_path: str, frame_idx: int) -> None:
 
-    # get alpha carbon dist and corr mat
+    """
+    Get alpha carbon distance and correlation matrices with cpptraj.
 
-    template=f'''parm {parm_path}
-trajin {traj_path}
+    Parameters
+    ----------
+    traj_path : str
+        Path to .nc file
+    parm_path : str
+        Path to .prmtop file
+    frame_idx : int
+        Frame index for representative frame
+    """
 
-reference {traj_path} {frame_idx}
+    template = f"""parm {Path(parm_path).absolute()}
+trajin {Path(traj_path).absolute()}
+
+reference {Path(traj_path).absolute()} {frame_idx}
 
 autoimage
 rms reference @CA
 matrix dist @CA out distmat.dat
-matrix correl @CA out corrmat.dat'''
+matrix correl @CA out corrmat.dat
+run"""
 
-    with NamedTemporaryFile() as cpptraj_in:
-        cpptraj_in.write(template)
-        cmd = f'cpptraj -i {cpptraj_in.name}'
+    with NamedTemporaryFile() as f:
+        f.write(bytes(template, "utf-8"))
+        f.seek(0)
+
+        cmd = f"cpptraj -i {f.name}"
         subprocess.run(shlex.split(cmd))
