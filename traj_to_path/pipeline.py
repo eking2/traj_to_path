@@ -1,4 +1,5 @@
-from . import preprocess
+from traj_to_path import preprocess, graph, utils
+from networkx.classes.graph import Graph
 
 
 def get_traj_feats(
@@ -46,3 +47,55 @@ def get_traj_feats(
 
     # cpptraj to get c-alpha distances and correlations
     preprocess.run_cpptraj(traj_path, parm_path, frame_idx)
+
+
+def get_sp_graph(
+    dist_path: str,
+    corr_path: str,
+    dist_cutoff: float = 6.0,
+    res_sep: int = 2,
+    sp_method: str = "dijkstra",
+    sp_cutoff: float = 0.25,
+) -> Graph:
+
+    """
+    Make shortest path graph from trajectory.
+
+    Parameters
+    ----------
+    dist_path : str
+        Path to distance matrix
+    corr_path : str
+        Path to correlation matrix
+    dist_cutoff : float
+        Pairwise distance cutoff to select edges
+    res_sep : int
+        Minimum sequence gap between start and end residue in graph
+    sp_method : str
+        Method to compute shortest path
+    sp_cutoff : float
+        Weight cutoff to keep highly connected edges
+
+    Returns
+    -------
+    G : Graph
+        Shortest path graph
+    """
+
+    # input dist and corr matrices
+    dist_mat = utils.parse_mat(dist_path)
+    corr_mat = utils.parse_mat(corr_path)
+
+    # to traj graph
+    traj_graph_df, traj_graph = graph.mats_to_edges(dist_mat, corr_mat, dist_cutoff)
+
+    # get shortest paths from expanding window on all residues
+    sp_list = graph.get_all_sp(traj_graph, res_sep, sp_method)
+
+    # count edges in paths
+    sp_edge_list, sp_edge_arr = graph.sp_to_edges(sp_list)
+
+    # make sp graph
+    df_G, G = graph.sp_edges_to_graph(sp_edge_list, sp_edge_arr, sp_cutoff)
+
+    return G
