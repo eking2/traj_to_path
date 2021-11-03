@@ -78,6 +78,8 @@ def get_sp_graph(
 
     Returns
     -------
+    df_G : pd.DataFrame
+        Edgelist dataframe with residues and weights
     G : Graph
         Shortest path graph
     """
@@ -98,4 +100,4 @@ def get_sp_graph(
     # make sp graph
     df_G, G = graph.sp_edges_to_graph(sp_edge_list, sp_edge_arr, sp_cutoff)
 
-    return G
+    return df_G, G

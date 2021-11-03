@@ -139,3 +139,33 @@ def pymol_com(graph: Graph, name: str = "traj_com", labels: bool = False) -> Non
     template.append("desel")
     out = "\n".join(template)
     Path(f"{name}.pml").write_text(out)
+
+
+def pymol_spm(graph: Graph, name: str = 'path_overlay') -> None:
+    
+    """Draw spm on pymol structure.
+    
+    Args:
+        graph (Graph): Trajectory graph weighted by correlation.
+        name (str): Output filename. Default 'path_overlay'
+    """
+
+    template = []
+    
+    # loop over all edges and draw weights
+    for i, (source, target, edge) in enumerate(graph.edges(data=True)):
+        weight = edge['weight']
+        
+        # size sphere/bond by weights
+        if weight > 0:
+            template.append(f'create edge_{i}, name ca in resi {source}+{target}')
+            template.append(f'show spheres, edge_{i}')
+            template.append(f'set sphere_scale, {weight}, edge_{i}')
+            template.append(f'bond name ca in resi {source}, name ca in resi {target}')
+            template.append(f'set stick_radius, {weight}, edge_{i}')
+            template.append(f'show sticks, edge_{i}')
+            
+    template.append('set stick_color, black, poly')
+    out = '\n'.join(template)
+    Path(f'{name}.pml').write_text(out)
+        
